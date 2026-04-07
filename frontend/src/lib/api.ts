@@ -2,7 +2,21 @@
 // PixelMind — API Client (FastAPI Bridge)
 // ═══════════════════════════════════════════
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const DEFAULT_API_PORT = process.env.NEXT_PUBLIC_API_PORT || '8000';
+
+export function getApiBase(): string {
+  const configuredApiBase = process.env.NEXT_PUBLIC_API_URL;
+  if (configuredApiBase) {
+    return configuredApiBase.replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+    return `${protocol}://${window.location.hostname}:${DEFAULT_API_PORT}`;
+  }
+
+  return `http://localhost:${DEFAULT_API_PORT}`;
+}
 
 interface ApiOptions {
   method?: string;
@@ -13,6 +27,7 @@ interface ApiOptions {
 
 async function apiCall<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, token } = options;
+  const apiBase = getApiBase();
 
   const requestHeaders: Record<string, string> = { ...headers };
 
@@ -24,11 +39,18 @@ async function apiCall<T>(endpoint: string, options: ApiOptions = {}): Promise<T
     requestHeaders['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    method,
-    headers: requestHeaders,
-    body,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${endpoint}`, {
+      method,
+      headers: requestHeaders,
+      body,
+    });
+  } catch {
+    throw new Error(
+      `Cannot reach backend at ${apiBase}. Ensure FastAPI is running and CORS allows this origin.`
+    );
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));

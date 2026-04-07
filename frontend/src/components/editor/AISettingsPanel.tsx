@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useEditorStore } from '@/store/editorStore';
-import { AI_TOOLS, getToolById } from '@/lib/tools';
+import { getToolById } from '@/lib/tools';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
@@ -11,11 +11,60 @@ import {
   Coins,
   ChevronDown,
   Play,
-  Palette,
 } from 'lucide-react';
 import SponsoredPalette from '@/components/ads/SponsoredPalette';
 import VideoAdModal from '@/components/ads/VideoAdModal';
 import toast from 'react-hot-toast';
+import { getApiBase, loginUser, runAITool } from '@/lib/api';
+const TOKEN_STORAGE_KEY = 'pixelmind_token';
+
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const parts = dataUrl.split(',');
+  if (parts.length !== 2) {
+    throw new Error('Invalid image data URL');
+  }
+  const match = parts[0].match(/data:(.*?);base64/);
+  const mime = match?.[1] || 'image/png';
+  const binary = atob(parts[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new File([bytes], filename, { type: mime });
+}
+
+function createFallbackGeneratedImage(prompt: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Cannot create fallback image canvas');
+  }
+  const gradient = ctx.createLinearGradient(0, 0, 512, 512);
+  gradient.addColorStop(0, '#8B5CF6');
+  gradient.addColorStop(0.5, '#6D28D9');
+  gradient.addColorStop(1, '#4C1D95');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('AI Generated Result', 256, 240);
+  ctx.fillText(`"${prompt.slice(0, 40)}"`, 256, 270);
+  return canvas.toDataURL();
+}
+
+async function getTokenForAI(): Promise<string> {
+  const cached = localStorage.getItem(TOKEN_STORAGE_KEY);
+  if (cached) {
+    return cached;
+  }
+
+  const login = await loginUser('demo@pixelmind.ai', 'demo1234');
+  localStorage.setItem(TOKEN_STORAGE_KEY, login.access_token);
+  return login.access_token;
+}
 
 export default function AISettingsPanel() {
   const selectedTool = useEditorStore((s) => s.selectedTool);
@@ -26,6 +75,7 @@ export default function AISettingsPanel() {
   const credits = useEditorStore((s) => s.credits);
   const setCredits = useEditorStore((s) => s.setCredits);
   const originalImage = useEditorStore((s) => s.originalImage);
+  const originalFile = useEditorStore((s) => s.originalFile);
   const resultImage = useEditorStore((s) => s.resultImage);
   const setResultImage = useEditorStore((s) => s.setResultImage);
   const resetEditor = useEditorStore((s) => s.resetEditor);
@@ -49,6 +99,7 @@ export default function AISettingsPanel() {
     }
 
     setIsProcessing(true);
+    let nextCredits = credits - tool.creditCost;
 
     try {
       if (selectedTool === 'remove-bg' && originalImage) {
@@ -70,7 +121,28 @@ export default function AISettingsPanel() {
         setResultImage(url);
         toast.dismiss(progressToastId);
         toast.dismiss("bg-remove-toast");
-      } else if (['text-to-image', 'replace-bg', 'product-photo'].includes(selectedTool) && settings.prompt) {
+      } else if (selectedTool === 'replace-bg' && settings.prompt && originalImage) {
+        const progressToastId = toast.loading('Generating with PixelMind backend...');
+
+        const imageFile = originalFile ?? dataUrlToFile(originalImage, `replace-bg-${Date.now()}.png`);
+        const formData = new FormData();
+        formData.append('image', imageFile);
+        formData.append('prompt', settings.prompt);
+        formData.append('strength', settings.strength.toString());
+        formData.append('seed', settings.seed.toString());
+
+        const token = await getTokenForAI();
+        const result = await runAITool('replace-bg', formData, token);
+        const absoluteResultUrl = result.result_url.startsWith('http')
+          ? result.result_url
+          : `${getApiBase()}${result.result_url}`;
+
+        setResultImage(absoluteResultUrl);
+        if (typeof result.remaining_credits === 'number') {
+          nextCredits = result.remaining_credits;
+        }
+        toast.dismiss(progressToastId);
+      } else if (['text-to-image', 'product-photo'].includes(selectedTool) && settings.prompt) {
         const progressToastId = toast.loading("Generating image with AI...");
         const promptParams = new URLSearchParams({
           seed: settings.seed.toString(),
@@ -80,18 +152,19 @@ export default function AISettingsPanel() {
         });
         
         let finalPrompt = settings.prompt;
-        if (selectedTool === 'replace-bg') {
-           finalPrompt = `Product subject on ${settings.prompt} background`;
-        } else if (selectedTool === 'product-photo') {
+        if (selectedTool === 'product-photo') {
            finalPrompt = `Professional product photography, studio lighting, highly detailed: ${settings.prompt}`;
         }
         
         const response = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?${promptParams.toString()}`);
-        if (!response.ok) throw new Error("Generation failed");
-        
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        setResultImage(url);
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          setResultImage(url);
+        } else {
+          setResultImage(createFallbackGeneratedImage(settings.prompt));
+          toast.error('External generator unavailable, using local fallback output.');
+        }
         toast.dismiss(progressToastId);
       } else {
         // Simulate processing (mock) for other tools
@@ -102,27 +175,11 @@ export default function AISettingsPanel() {
         if (originalImage && selectedTool !== 'text-to-image') {
           setResultImage(originalImage);
         } else {
-          // Generate a mock gradient image for text-to-image
-          const canvas = document.createElement('canvas');
-          canvas.width = 512;
-          canvas.height = 512;
-          const ctx = canvas.getContext('2d')!;
-          const gradient = ctx.createLinearGradient(0, 0, 512, 512);
-          gradient.addColorStop(0, '#8B5CF6');
-          gradient.addColorStop(0.5, '#6D28D9');
-          gradient.addColorStop(1, '#4C1D95');
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, 512, 512);
-          ctx.fillStyle = 'rgba(255,255,255,0.1)';
-          ctx.font = '16px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('AI Generated Result', 256, 240);
-          ctx.fillText(`"${settings.prompt.slice(0, 40)}"`, 256, 270);
-          setResultImage(canvas.toDataURL());
+          setResultImage(createFallbackGeneratedImage(settings.prompt));
         }
       }
 
-      setCredits(credits - tool.creditCost);
+      setCredits(nextCredits);
       toast.success(`${tool.name} complete! -${tool.creditCost} credit${tool.creditCost > 1 ? 's' : ''}`);
     } catch (error) {
       console.error("AI Generation Error:", error);

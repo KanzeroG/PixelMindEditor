@@ -9,6 +9,8 @@ import time
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+from services.replacebg_inference import replace_background
+
 
 async def mock_remove_bg(image: Image.Image) -> Image.Image:
     """Simulate background removal by making edges transparent."""
@@ -136,7 +138,9 @@ async def process_image(
 
     if tool_id == "text-to-image":
         return await handler(prompt, seed)
-    elif tool_id in ("product-photo", "replace-bg", "uncrop"):
+    elif tool_id == "replace-bg":
+        return await replace_background(image=image, prompt=prompt, strength=strength, seed=seed)
+    elif tool_id in ("product-photo", "uncrop"):
         return await handler(image, prompt)
     else:
         return await handler(image)

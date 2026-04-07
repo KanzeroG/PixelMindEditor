@@ -11,11 +11,20 @@ from fastapi.staticfiles import StaticFiles
 from routers import auth, user, ai, gallery, ads
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+
+# Ensure static directories exist before StaticFiles mounts are created.
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+
 # Create uploads directory on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    os.makedirs("uploads", exist_ok=True)
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     print("🚀 PixelMind API is running")
     yield
     print("👋 PixelMind API shutting down")
@@ -28,21 +37,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+default_cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+extra_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+    if origin.strip()
+]
+cors_origins = list(dict.fromkeys(default_cors_origins + extra_cors_origins))
+
 # ── CORS ──
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── Static files (serve uploaded/result images) ──
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-app.mount("/results", StaticFiles(directory="results"), name="results")
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+app.mount("/results", StaticFiles(directory=RESULTS_DIR), name="results")
 
 # ── Routers ──
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])

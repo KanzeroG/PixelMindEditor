@@ -124,9 +124,18 @@ async def product_photo(
 async def replace_bg(
     image: UploadFile = File(...),
     prompt: str = Form(""),
+    strength: float = Form(0.95),
+    seed: int = Form(42),
     user_id: str = Depends(get_current_user_id),
 ):
-    return await handle_ai_request("replace-bg", user_id, image_file=image, prompt=prompt)
+    return await handle_ai_request(
+        "replace-bg",
+        user_id,
+        image_file=image,
+        prompt=prompt,
+        strength=strength,
+        seed=seed,
+    )
 
 
 @router.post("/text-to-image", response_model=AIResponse)
