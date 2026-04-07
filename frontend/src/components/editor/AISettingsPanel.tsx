@@ -15,7 +15,7 @@ import {
 import SponsoredPalette from '@/components/ads/SponsoredPalette';
 import VideoAdModal from '@/components/ads/VideoAdModal';
 import toast from 'react-hot-toast';
-import { getApiBase, loginUser, runAITool } from '@/lib/api';
+import { getApiBase, getUserProfile, loginUser, runAITool } from '@/lib/api';
 const TOKEN_STORAGE_KEY = 'pixelmind_token';
 
 function dataUrlToFile(dataUrl: string, filename: string): File {
@@ -58,12 +58,30 @@ function createFallbackGeneratedImage(prompt: string): string {
 async function getTokenForAI(): Promise<string> {
   const cached = localStorage.getItem(TOKEN_STORAGE_KEY);
   if (cached) {
-    return cached;
+    try {
+      await getUserProfile(cached);
+      return cached;
+    } catch {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
   }
 
   const login = await loginUser('demo@pixelmind.ai', 'demo1234');
   localStorage.setItem(TOKEN_STORAGE_KEY, login.access_token);
   return login.access_token;
+}
+
+function shouldRefreshToken(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('user not found') ||
+    message.includes('invalid or expired token') ||
+    message.includes('invalid token payload') ||
+    message.includes('401')
+  );
 }
 
 export default function AISettingsPanel() {
@@ -131,8 +149,18 @@ export default function AISettingsPanel() {
         formData.append('strength', settings.strength.toString());
         formData.append('seed', settings.seed.toString());
 
-        const token = await getTokenForAI();
-        const result = await runAITool('replace-bg', formData, token);
+        let token = await getTokenForAI();
+        let result;
+        try {
+          result = await runAITool('replace-bg', formData, token);
+        } catch (error) {
+          if (!shouldRefreshToken(error)) {
+            throw error;
+          }
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+          token = await getTokenForAI();
+          result = await runAITool('replace-bg', formData, token);
+        }
         const absoluteResultUrl = result.result_url.startsWith('http')
           ? result.result_url
           : `${getApiBase()}${result.result_url}`;
