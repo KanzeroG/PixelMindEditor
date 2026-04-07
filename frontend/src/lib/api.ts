@@ -98,7 +98,13 @@ export async function runAITool(
   formData: FormData,
   token: string,
   onProgress?: (progress: number) => void
-): Promise<{ result_url: string; remaining_credits: number; processing_time: number }> {
+): Promise<{
+  success: boolean;
+  result_url?: string | null;
+  remaining_credits: number;
+  processing_time: number;
+  error?: string | null;
+}> {
   // Simulate progress updates
   if (onProgress) {
     const interval = setInterval(() => {
@@ -107,9 +113,11 @@ export async function runAITool(
 
     try {
       const result = await apiCall<{
-        result_url: string;
+        success: boolean;
+        result_url?: string | null;
         remaining_credits: number;
         processing_time: number;
+        error?: string | null;
       }>(`/api/ai/${tool}`, {
         method: 'POST',
         body: formData,

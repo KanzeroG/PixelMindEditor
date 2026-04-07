@@ -161,6 +161,11 @@ export default function AISettingsPanel() {
           token = await getTokenForAI();
           result = await runAITool('replace-bg', formData, token);
         }
+
+        if (!result?.success || !result?.result_url) {
+          throw new Error(result?.error || 'Replace background did not return an image URL.');
+        }
+
         const absoluteResultUrl = result.result_url.startsWith('http')
           ? result.result_url
           : `${getApiBase()}${result.result_url}`;
@@ -211,7 +216,8 @@ export default function AISettingsPanel() {
       toast.success(`${tool.name} complete! -${tool.creditCost} credit${tool.creditCost > 1 ? 's' : ''}`);
     } catch (error) {
       console.error("AI Generation Error:", error);
-      toast.error("Failed to process image");
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process image';
+      toast.error(errorMessage);
       toast.dismiss();
     } finally {
       setIsProcessing(false);
