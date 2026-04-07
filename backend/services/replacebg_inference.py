@@ -63,11 +63,13 @@ def _load_lora_weights(pipe: StableDiffusionInpaintPipeline) -> None:
 
     model_dir = str(LORA_MODEL_PATH.parent)
     weight_name = LORA_MODEL_PATH.name
+    load_from_path_error: Optional[Exception] = None
 
     try:
         pipe.load_lora_weights(model_dir, weight_name=weight_name)
         return
-    except Exception as load_from_path_error:
+    except Exception as err:
+        load_from_path_error = err
         pass
 
     try:
